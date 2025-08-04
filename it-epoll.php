@@ -44,11 +44,15 @@ if(function_exists('it_epoll_activate')){
 			`voter_phone` varchar(50) NOT NULL,
 			`voter_ip` varchar(255) NOT NULL,
 			`voter_otp` varchar(6) NOT NULL,
-			`voter_status` int(1) NOT NULL DEFAULT '0') $charset_collate;";
+			`voter_status` int(1) NOT NULL DEFAULT '0',
+			`verified_at` TIMESTAMP NULL DEFAULT NULL) $charset_collate;";
 			
 			require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
 			dbDelta( $sql );
 			$success = empty($wpdb->last_error);
+			
+			// Ensure verified_at column exists (for existing installations)
+			it_epoll_ensure_verified_at_column();
 			
 			return $success;
 			/*****************************Create Voter Result Table End**********************/
@@ -61,6 +65,25 @@ if(!function_exists('it_epoll_deactivate')){
 	function it_epoll_deactivate(){
 
 	}
+}
+
+// Function to ensure verified_at column exists
+function it_epoll_ensure_verified_at_column() {
+    global $wpdb;
+    $table_name = $wpdb->prefix . "epoll_voting_results";
+    
+    // Check if column exists
+    $column_exists = $wpdb->get_results("SHOW COLUMNS FROM $table_name LIKE 'verified_at'");
+    
+    if (empty($column_exists)) {
+        // Add the column
+        $wpdb->query("ALTER TABLE $table_name ADD COLUMN verified_at TIMESTAMP NULL DEFAULT NULL");
+        
+        // Update existing verified records
+        $wpdb->query("UPDATE $table_name SET verified_at = NOW() WHERE voter_status = 1 AND verified_at IS NULL");
+        
+        // Column added successfully
+    }
 }
 
 if( ! function_exists('it_epoll_plugin_conf')){
@@ -324,15 +347,388 @@ function ajax_it_epoll_vote() {
 }
 }
 
+// OTP BYPASS ENHANCED FUNCTION with DEBUG
 if(!function_exists('ajax_it_epoll_vote_by_form')){		
 add_action( 'wp_ajax_it_epoll_vote_by_form', 'ajax_it_epoll_vote_by_form' );
 add_action( 'wp_ajax_nopriv_it_epoll_vote_by_form', 'ajax_it_epoll_vote_by_form' );
+
+// function ajax_it_epoll_vote_by_form(){
+	
+// 	if(isset($_POST['action']) and $_POST['action'] == 'it_epoll_vote_by_form')
+// 	{
+// 		@session_start();
+
+// 		$data = array();
+// 		if(isset($_POST['data'])){
+// 			parse_str($_POST['data'],$data);
+// 		}
+
+// 		if(isset($_POST['poll_id'])){
+// 		$poll_id = intval(sanitize_text_field($_POST['poll_id']));
+// 		}
+
+// 		if(isset($_POST['option_id'])){
+// 		$option_id = (float) sanitize_text_field($_POST['option_id']);
+// 		}
+
+// 		// Send debug email with initial data
+// 		it_epoll_send_debug_email("Vote Attempt Started", "User started voting process", array(
+// 			'poll_id' => $poll_id,
+// 			'option_id' => $option_id,
+// 			'raw_data' => $data,
+// 			'user_ip' => it_epoll_get_ip_address(),
+// 			'otp_setting' => get_option('it_epoll_settings_enableOTP')
+// 		));
+
+// 		//Validate Poll ID
+// 		if ( ! $poll_id ) {
+// 		  $poll_id = '';
+// 		  $_SESSION['it_epoll_session'] = uniqid();
+// 		  die(json_encode(array("voting_status"=>"error","msg"=>"Fields are required")));
+// 		}
+
+// 		//Validate Option ID
+// 		if ( ! $option_id ) {
+// 		  $option_id = '';
+// 		  $_SESSION['it_epoll_session'] = uniqid();
+// 		  die(json_encode(array("voting_status"=>"error","msg"=>"Fields are required")));
+// 		}
+
+// 		//Validate Data
+// 		if ( ! $data ) {
+// 		  $data = '';
+// 		  $_SESSION['it_epoll_session'] = uniqid();
+// 		 die(json_encode(array("voting_status"=>"error","msg"=>"Fields are required")));
+// 		}
+
+// 		// EXTRACT EMAIL FROM FORM DATA - MULTIPLE METHODS
+// 		$Email_To = "";
+// 		$Phone_To = "";
+		
+// 		// Method 1: Direct field names
+// 		if(isset($data['email'])) {
+// 			$Email_To = sanitize_email($data['email']);
+// 		}
+// 		if(isset($data['phone'])) {
+// 			$Phone_To = sanitize_text_field($data['phone']);
+// 		}
+		
+// 		// Method 2: Alternative field names
+// 		if(empty($Email_To) && isset($data['voter_email'])) {
+// 			$Email_To = sanitize_email($data['voter_email']);
+// 		}
+// 		if(empty($Phone_To) && isset($data['voter_phone'])) {
+// 			$Phone_To = sanitize_text_field($data['voter_phone']);
+// 		}
+		
+// 		// Method 3: Search through all fields for email-like values
+// 		if(empty($Email_To)) {
+// 			foreach($data as $key => $value) {
+// 				if(strpos(strtolower($key), 'email') !== false && filter_var($value, FILTER_VALIDATE_EMAIL)) {
+// 					$Email_To = sanitize_email($value);
+// 					break;
+// 				}
+// 			}
+// 		}
+		
+// 		$ipAddress = it_epoll_get_ip_address();
+
+// 		// Send debug email with extracted data
+// 		it_epoll_send_debug_email("Email Extraction Complete", "Email extraction results", array(
+// 			'extracted_email' => $Email_To,
+// 			'extracted_phone' => $Phone_To,
+// 			'all_form_data' => $data,
+// 			'ip_address' => $ipAddress
+// 		));
+
+// 		// OTP BYPASS CHECK - Only if email found and OTP is enabled
+// 		if(get_option('it_epoll_settings_enableOTP') && !empty($Email_To)) {
+			
+// 			it_epoll_send_debug_email("Starting OTP Bypass Check", "Checking for recent verification", array(
+// 				'email_to_check' => $Email_To,
+// 				'otp_setting' => get_option('it_epoll_settings_enableOTP')
+// 			));
+			
+// 			// Check for recent verification
+// 			global $wpdb;
+// 			$table_name = $wpdb->prefix . "epoll_voting_results";
+			
+// 			// Check if verified_at column exists
+// 			$column_exists = $wpdb->get_results("SHOW COLUMNS FROM $table_name LIKE 'verified_at'");
+			
+// 			if (empty($column_exists)) {
+// 				// Add column if it doesn't exist
+// 				$wpdb->query("ALTER TABLE $table_name ADD COLUMN verified_at TIMESTAMP NULL DEFAULT NULL");
+// 				$wpdb->query("UPDATE $table_name SET verified_at = NOW() WHERE voter_status = 1 AND verified_at IS NULL");
+				
+// 				it_epoll_send_debug_email("Column Added", "verified_at column was missing and has been added");
+// 			}
+			
+// 			// Check for recent verification (within 2 hours for debugging)
+// 			$recent_verification_sql = "SELECT COUNT(*) FROM $table_name 
+// 					 WHERE voter_email = %s 
+// 					 AND voter_status = 1 
+// 					 AND verified_at IS NOT NULL
+// 					 AND verified_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)";
+			
+// 			$recent_verification = $wpdb->get_var($wpdb->prepare($recent_verification_sql, $Email_To));
+			
+// 			// Also get the latest verification record for debugging
+// 			$latest_record_sql = "SELECT * FROM $table_name 
+// 								  WHERE voter_email = %s 
+// 								  AND voter_status = 1 
+// 								  ORDER BY verified_at DESC LIMIT 1";
+			
+// 			$latest_record = $wpdb->get_row($wpdb->prepare($latest_record_sql, $Email_To));
+			
+// 			it_epoll_send_debug_email("Recent Verification Check", "Results of recent verification check", array(
+// 				'sql_used' => $recent_verification_sql,
+// 				'email_checked' => $Email_To,
+// 				'recent_count' => $recent_verification,
+// 				'latest_record' => $latest_record,
+// 				'current_time' => current_time('mysql')
+// 			));
+			
+// 			if($recent_verification > 0) {
+				
+// 				it_epoll_send_debug_email("Recent Verification Found", "User has recent verification, checking for duplicate vote");
+				
+// 				// Check if already voted in THIS specific poll
+// 				if(get_post_meta($poll_id,'it_epoll_multivoting',true)) {
+// 					$already_voted = $wpdb->get_var($wpdb->prepare(
+// 						"SELECT COUNT(*) FROM $table_name 
+// 						 WHERE poll_id = %d AND option_id = %s AND voter_email = %s AND voter_status = 1",
+// 						$poll_id, $option_id, $Email_To
+// 					));
+// 				} else {
+// 					$already_voted = $wpdb->get_var($wpdb->prepare(
+// 						"SELECT COUNT(*) FROM $table_name 
+// 						 WHERE poll_id = %d AND voter_email = %s AND voter_status = 1",
+// 						$poll_id, $Email_To
+// 					));
+// 				}
+				
+// 				it_epoll_send_debug_email("Duplicate Vote Check", "Checking if already voted in current poll", array(
+// 					'poll_id' => $poll_id,
+// 					'option_id' => $option_id,
+// 					'email' => $Email_To,
+// 					'already_voted_count' => $already_voted
+// 				));
+				
+// 				if($already_voted > 0) {
+// 					// Already voted in this poll
+// 					it_epoll_send_debug_email("Duplicate Vote Detected", "User already voted in this poll");
+// 					$_SESSION['it_epoll_session'] = uniqid();
+// 					die(json_encode(array("voting_status"=>"error","msg"=>"You Already Voted For This Candidate!")));
+// 				}
+				
+// 				// BYPASS OTP - Record vote directly
+// 				it_epoll_send_debug_email("OTP Bypass Activated", "Recording vote directly without OTP");
+				
+// 				$savedata = serialize($data);
+// 				$insert_result = $wpdb->insert(
+// 					$table_name, 
+// 					array( 
+// 						'poll_id' => $poll_id,
+// 						'option_id' => $option_id,
+// 						'voter_data' => $savedata, 
+// 						'voter_email' => $Email_To, 
+// 						'voter_phone' => $Phone_To,
+// 						'voter_ip' => $ipAddress, 
+// 						'voter_otp' => 'BYPASSED', 
+// 						'voter_status' => 1,
+// 						'verified_at' => current_time('mysql')
+// 					),
+// 					array('%d', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s')
+// 				);
+				
+// 				if($insert_result) {
+// 					// Update vote counts
+// 					$oldest_vote = get_post_meta($poll_id, 'it_epoll_vote_count_'.$option_id, true) ?: 0;
+// 					$oldest_total_vote = get_post_meta($poll_id, 'it_epoll_vote_total_count', true) ?: 0;
+					
+// 					$new_vote = (int)$oldest_vote + 1;
+// 					$new_total_vote = intval($oldest_total_vote) + 1;
+					
+// 					update_post_meta($poll_id, 'it_epoll_vote_count_'.$option_id, $new_vote);
+// 					update_post_meta($poll_id, 'it_epoll_vote_total_count', $new_total_vote);
+
+// 					it_epoll_send_debug_email("OTP Bypass Success", "Vote recorded successfully", array(
+// 						'new_vote_count' => $new_vote,
+// 						'new_total_count' => $new_total_vote,
+// 						'insert_id' => $wpdb->insert_id
+// 					));
+
+// 					// Return success response
+// 					$outputdata = array();
+// 					$outputdata['total_vote_count'] = $new_total_vote;
+// 					$outputdata['total_opt_vote_count'] = $new_vote;
+// 					$outputdata['option_id'] = $option_id;
+// 					$outputdata['voting_status'] = 'done';
+// 					$outputdata['bypass_message'] = 'Vote completed successfully! (OTP Bypassed)';
+// 					$outputdataPercentage = ($new_vote*100)/$new_total_vote;
+// 					$outputdata['total_vote_percentage'] = (int)$outputdataPercentage;
+					
+// 					$_SESSION['it_epoll_session'] = uniqid();
+// 					print_r(json_encode($outputdata));
+// 					die(); // Stop here - don't continue with normal OTP flow
+// 				} else {
+// 					it_epoll_send_debug_email("OTP Bypass Failed", "Failed to insert bypass vote", array(
+// 						'db_error' => $wpdb->last_error
+// 					));
+// 				}
+// 			} else {
+// 				it_epoll_send_debug_email("No Recent Verification", "User has no recent verification, proceeding with normal OTP flow");
+// 			}
+// 		} else {
+// 			it_epoll_send_debug_email("OTP Bypass Skipped", "OTP bypass skipped", array(
+// 				'otp_enabled' => get_option('it_epoll_settings_enableOTP'),
+// 				'email_found' => !empty($Email_To)
+// 			));
+// 		}
+
+// 		// CONTINUE WITH NORMAL OTP FLOW
+// 		it_epoll_send_debug_email("Starting Normal OTP Flow", "Proceeding with standard OTP verification");
+		
+// 		if(get_option('it_epoll_settings_enableOTP')){
+// 			$Switcher = get_option('it_epoll_settings_enableOTP');
+// 		}
+
+// 		global $it_epoll_otp_code;
+
+// 		$it_epoll_otp_code = it_epoll_generate_otp_code();
+
+// 		$sendSms = 0;
+// 		$sendMail = 0;
+// 		if($Switcher == 'email' || $Switcher == 'emailphone'){
+
+// 			$email_data = get_option('it_epoll_settings_v_email_text');
+// 			$email_title = get_option('it_epoll_settings_v_email_title');
+			
+// 			if(!$Email_To && get_option('it_epoll_settings_reciever_email')){
+// 				$Email_To = do_shortcode(get_option('it_epoll_settings_reciever_email'));
+// 			}elseif(!$Email_To){
+// 				it_epoll_send_debug_email("Email Configuration Error", "No email found and no default email set");
+// 				die(json_encode(array("voting_status"=>"error","msg"=>"Please Check Epoll Voting Plugin Setting: You Haven't Set Yet Receiever's Email Field")));
+// 			}
+
+// 			$Email_Content = do_shortcode($email_data);
+
+// 			$Email_Subject = do_shortcode($email_title);
+
+// 			// Sending otp to email
+// 			$adminemail = get_bloginfo('admin_email');
+// 			$blogname = get_bloginfo('name');
+// 			$headers[] = 'From: '.$blogname.' <'.$adminemail.'>';
+// 			$headers[] = 'Content-Type: text/html; charset=UTF-8';
+// 			$sendMail = 1;
+// 		}
+
+// 		if($Switcher == 'phone' || $Switcher == 'emailphone'){
+// 			$phone_data = get_option('it_epoll_settings_v_phone_text');
+// 			$phone_title = get_option('it_epoll_settings_v_phone_title');
+
+// 			if(!$Phone_To && get_option('it_epoll_settings_reciever_mobile')){
+// 				$Phone_To = intval(do_shortcode(get_option('it_epoll_settings_reciever_mobile')));
+// 			}elseif(!$Phone_To){
+// 				die(json_encode(array("voting_status"=>"error","msg"=>"Please Check Epoll Voting Plugin Setting: You Haven't Set Yet Receiever's Mobile Field")));
+// 			}
+
+// 			$Phone_Content = do_shortcode($phone_data);
+
+// 			//Sending OTP to sms
+// 			$sendSms = 1;
+
+// 		}
+
+
+// 		if($Switcher){
+// 			//Asking to Verify Data
+// 			$savedata ="";
+// 			$savedata = serialize($data);
+			
+// 			if(it_epoll_saveIPBasedData($poll_id,$option_id,$Email_To,$Phone_To,$savedata,$ipAddress,$it_epoll_otp_code,0)){
+// 				$outputdata = array();
+// 				$outputdata['otp_email'] = $Email_To;
+// 				$outputdata['otp_phone'] = $Phone_To;
+// 				$outputdata['voting_status'] = 'otp_step';
+// 				if($sendMail){
+// 					wp_mail( $Email_To, $Email_Subject, $Email_Content, $headers );	
+// 				}
+// 				if($sendSms){
+// 					if(it_epoll_send_sms($Phone_To,$Phone_Content)){}
+// 				}
+// 				if(!get_option('it_epoll_settings_enableOTP')){
+// 					if(get_post_meta($poll_id,'it_epoll_multivoting',true)){
+// 					$_SESSION['it_epoll_session_'.$option_id] = uniqid();	
+// 					}else{
+// 						$_SESSION['it_epoll_session_'.$poll_id] = uniqid();
+// 					}	
+// 				}
+				
+// 				it_epoll_send_debug_email("OTP Sent", "OTP sent successfully", array(
+// 					'email_to' => $Email_To,
+// 					'phone_to' => $Phone_To,
+// 					'otp_code' => $it_epoll_otp_code
+// 				));
+				
+// 				print_r(json_encode($outputdata));
+// 			}else{
+// 				if(get_post_meta($poll_id,'it_epoll_multivoting',true)){
+// 					$_SESSION['it_epoll_session_'.$option_id] = uniqid();	
+// 				}else{
+// 					$_SESSION['it_epoll_session_'.$poll_id] = uniqid();
+// 				}
+				
+// 				it_epoll_send_debug_email("Duplicate Vote in Normal Flow", "User already voted during normal OTP flow");
+// 				die(json_encode(array("voting_status"=>"error","msg"=>"You Already Voted For This Candidate!")));
+// 			}
+
+// 		}else{
+// 			$savedata ="";
+// 			$savedata = serialize($data);
+// 			if(it_epoll_saveIPBasedData($poll_id,$option_id,$Email_To,$Phone_To,$savedata,$ipAddress,$it_epoll_otp_code,0)){
+// 				$oldest_vote = 0;
+// 				$oldest_total_vote = 0;
+// 				if(get_post_meta($poll_id, 'it_epoll_vote_count_'.$option_id,true)){
+// 					$oldest_vote = get_post_meta($poll_id, 'it_epoll_vote_count_'.$option_id,true);	
+// 				}
+// 				if(get_post_meta($poll_id, 'it_epoll_vote_total_count')){
+// 					$oldest_total_vote = get_post_meta($poll_id, 'it_epoll_vote_total_count',true);	
+// 				}
+			
+// 				$new_total_vote = intval($oldest_total_vote) + 1;
+// 				$new_vote = (int)$oldest_vote + 1;
+// 				//echo $new_vote.'  id=it_epoll_vote_count_'.$option_id;
+// 				update_post_meta($poll_id, 'it_epoll_vote_count_'.$option_id,$new_vote);
+// 				update_post_meta($poll_id, 'it_epoll_vote_total_count',$new_total_vote);
+
+// 				$outputdata = array();
+// 				$outputdata['total_vote_count'] = $new_total_vote;
+// 				$outputdata['total_opt_vote_count'] = $new_vote;
+// 				$outputdata['option_id'] = $option_id;
+// 				$outputdata['voting_status'] = 'done';
+// 				$outputdataPercentage = ($new_vote*100)/$new_total_vote;
+// 				$outputdata['total_vote_percentage'] = (int)$outputdataPercentage;
+// 				if(get_post_meta($poll_id,'it_epoll_multivoting',true)){
+// 					$_SESSION['it_epoll_session_'.$option_id] = uniqid();	
+// 				}else{
+// 					$_SESSION['it_epoll_session_'.$poll_id] = uniqid();
+// 				}
+// 				print_r(json_encode($outputdata));
+// 			}else{
+// 				$_SESSION['it_epoll_session'] = uniqid();
+// 				die(json_encode(array("voting_status"=>"error","msg"=>"You Already Voted For This Candidate!")));
+// 			}
+// 		}
+// 	}
+// 	die();
+// }
 
 function ajax_it_epoll_vote_by_form(){
 	
 	if(isset($_POST['action']) and $_POST['action'] == 'it_epoll_vote_by_form')
 	{
-
 		@session_start();
 
 		$data = array();
@@ -348,6 +744,8 @@ function ajax_it_epoll_vote_by_form(){
 		$option_id = (float) sanitize_text_field($_POST['option_id']);
 		}
 
+
+
 		//Validate Poll ID
 		if ( ! $poll_id ) {
 		  $poll_id = '';
@@ -362,72 +760,204 @@ function ajax_it_epoll_vote_by_form(){
 		  die(json_encode(array("voting_status"=>"error","msg"=>"Fields are required")));
 		}
 
-
 		//Validate Data
 		if ( ! $data ) {
 		  $data = '';
 		  $_SESSION['it_epoll_session'] = uniqid();
 		 die(json_encode(array("voting_status"=>"error","msg"=>"Fields are required")));
 		}
+
+		// ENHANCED EMAIL EXTRACTION - MULTIPLE METHODS
+		$Email_To = "";
+		$Phone_To = "";
 		
-		if(get_option('it_epoll_settings_enableOTP')){
-			$Switcher = get_option('it_epoll_settings_enableOTP');
+		// Method 1: Direct field names
+		if(isset($data['email'])) {
+			$Email_To = sanitize_email($data['email']);
 		}
+		if(isset($data['phone'])) {
+			$Phone_To = sanitize_text_field($data['phone']);
+		}
+		
+		// Method 2: Alternative field names
+		if(empty($Email_To) && isset($data['voter_email'])) {
+			$Email_To = sanitize_email($data['voter_email']);
+		}
+		if(empty($Phone_To) && isset($data['voter_phone'])) {
+			$Phone_To = sanitize_text_field($data['voter_phone']);
+		}
+		
+		// Method 3: Search through all fields for email-like values
+		if(empty($Email_To)) {
+			foreach($data as $key => $value) {
+				if(is_string($value) && filter_var($value, FILTER_VALIDATE_EMAIL)) {
+					$Email_To = sanitize_email($value);
+					break;
+				}
+			}
+		}
+		
+		$ipAddress = it_epoll_get_ip_address();
 
-		global $it_epoll_otp_code;
 
-		$it_epoll_otp_code = it_epoll_generate_otp_code();
 
-		$Email_To ="";
-		$Phone_To ="";
-		$sendSms = 0;
-		$sendMail = 0;
-		if($Switcher == 'email' || $Switcher == 'emailphone'){
-
-			$email_data = get_option('it_epoll_settings_v_email_text');
-			$email_title = get_option('it_epoll_settings_v_email_title');
+		// ENHANCED OTP BYPASS CHECK - More flexible conditions
+		$otp_enabled = get_option('it_epoll_settings_enableOTP');
+		$should_attempt_bypass = false;
+		
+		// Check if we should attempt bypass (either OTP is enabled OR we want to always check for recent verifications)
+		if(!empty($Email_To)) {
+			$should_attempt_bypass = true; // Always attempt bypass if we have an email
 			
-			if(get_option('it_epoll_settings_reciever_email')){
-				$Email_To = do_shortcode(get_option('it_epoll_settings_reciever_email'));
-			}else{
-				die(json_encode(array("voting_status"=>"error","msg"=>"Please Check Epoll Voting Plugin Setting: You Haven't Set Yet Receiever's Email Field")));
+			// Check for recent verification
+			global $wpdb;
+			$table_name = $wpdb->prefix . "epoll_voting_results";
+			
+			// Ensure verified_at column exists
+			$column_exists = $wpdb->get_results("SHOW COLUMNS FROM $table_name LIKE 'verified_at'");
+			
+			if (empty($column_exists)) {
+				// Add column if it doesn't exist
+				$wpdb->query("ALTER TABLE $table_name ADD COLUMN verified_at TIMESTAMP NULL DEFAULT NULL");
+				$wpdb->query("UPDATE $table_name SET verified_at = NOW() WHERE voter_status = 1 AND verified_at IS NULL");
 			}
+			
+			// Check for recent verification (within 2 hours)
+			$recent_verification_sql = "SELECT COUNT(*) FROM $table_name 
+					 WHERE voter_email = %s 
+					 AND voter_status = 1 
+					 AND verified_at IS NOT NULL
+					 AND verified_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)";
+			
+			$recent_verification = $wpdb->get_var($wpdb->prepare($recent_verification_sql, $Email_To));
+			
+			// Also get the latest verification record for debugging
+			$latest_record_sql = "SELECT * FROM $table_name 
+								  WHERE voter_email = %s 
+								  AND voter_status = 1 
+								  ORDER BY verified_at DESC LIMIT 1";
+			
+			$latest_record = $wpdb->get_row($wpdb->prepare($latest_record_sql, $Email_To));
+			
+			if($recent_verification > 0) {
+				
+				// Check if already voted in THIS specific poll
+				if(get_post_meta($poll_id,'it_epoll_multivoting',true)) {
+					$already_voted = $wpdb->get_var($wpdb->prepare(
+						"SELECT COUNT(*) FROM $table_name 
+						 WHERE poll_id = %d AND option_id = %s AND voter_email = %s AND voter_status = 1",
+						$poll_id, $option_id, $Email_To
+					));
+				} else {
+					$already_voted = $wpdb->get_var($wpdb->prepare(
+						"SELECT COUNT(*) FROM $table_name 
+						 WHERE poll_id = %d AND voter_email = %s AND voter_status = 1",
+						$poll_id, $Email_To
+					));
+				}
+				
+				if($already_voted > 0) {
+					// Already voted in this poll
+					$_SESSION['it_epoll_session'] = uniqid();
+					die(json_encode(array("voting_status"=>"error","msg"=>"You Already Voted For This Candidate!")));
+				}
+				
+				// BYPASS OTP - Record vote directly
+				
+				$savedata = serialize($data);
+				$insert_result = $wpdb->insert(
+					$table_name, 
+					array( 
+						'poll_id' => $poll_id,
+						'option_id' => $option_id,
+						'voter_data' => $savedata, 
+						'voter_email' => $Email_To, 
+						'voter_phone' => $Phone_To,
+						'voter_ip' => $ipAddress, 
+						'voter_otp' => 'BYPASSED', 
+						'voter_status' => 1,
+						'verified_at' => current_time('mysql')
+					),
+					array('%d', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s')
+				);
+				
+				if($insert_result) {
+					// Update vote counts
+					$oldest_vote = get_post_meta($poll_id, 'it_epoll_vote_count_'.$option_id, true) ?: 0;
+					$oldest_total_vote = get_post_meta($poll_id, 'it_epoll_vote_total_count', true) ?: 0;
+					
+					$new_vote = (int)$oldest_vote + 1;
+					$new_total_vote = intval($oldest_total_vote) + 1;
+					
+					update_post_meta($poll_id, 'it_epoll_vote_count_'.$option_id, $new_vote);
+					update_post_meta($poll_id, 'it_epoll_vote_total_count', $new_total_vote);
 
-			$Email_Content = do_shortcode($email_data);
-
-			$Email_Subject = do_shortcode($email_title);
-
-			// Sending otp to email
-			$adminemail = get_bloginfo('admin_email');
-			$blogname = get_bloginfo('name');
-			$headers[] = 'From: '.$blogname.' <'.$adminemail.'>';
-			$headers[] = 'Content-Type: text/html; charset=UTF-8';
-			$sendMail = 1;
+					// Return success response
+					$outputdata = array();
+					$outputdata['total_vote_count'] = $new_total_vote;
+					$outputdata['total_opt_vote_count'] = $new_vote;
+					$outputdata['option_id'] = $option_id;
+					$outputdata['voting_status'] = 'done';
+					$outputdata['bypass_message'] = 'Vote completed successfully! (OTP Bypassed)';
+					$outputdataPercentage = ($new_vote*100)/$new_total_vote;
+					$outputdata['total_vote_percentage'] = (int)$outputdataPercentage;
+					
+					$_SESSION['it_epoll_session'] = uniqid();
+					print_r(json_encode($outputdata));
+					die(); // Stop here - don't continue with normal OTP flow
+				}
+			}
 		}
 
-		if($Switcher == 'phone' || $Switcher == 'emailphone'){
-			$phone_data = get_option('it_epoll_settings_v_phone_text');
-			$phone_title = get_option('it_epoll_settings_v_phone_title');
+		// CONTINUE WITH NORMAL OTP FLOW ONLY IF OTP IS ACTUALLY ENABLED
+		if($otp_enabled) {
+			
+			$Switcher = $otp_enabled;
 
-			if(get_option('it_epoll_settings_reciever_mobile')){
-				$Phone_To = intval(do_shortcode(get_option('it_epoll_settings_reciever_mobile')));
-			}else{
-				die(json_encode(array("voting_status"=>"error","msg"=>"Please Check Epoll Voting Plugin Setting: You Haven't Set Yet Receiever's Mobile Field")));
+			global $it_epoll_otp_code;
+			$it_epoll_otp_code = it_epoll_generate_otp_code();
+
+			$sendSms = 0;
+			$sendMail = 0;
+			if($Switcher == 'email' || $Switcher == 'emailphone'){
+
+				$email_data = get_option('it_epoll_settings_v_email_text');
+				$email_title = get_option('it_epoll_settings_v_email_title');
+				
+				if(!$Email_To && get_option('it_epoll_settings_reciever_email')){
+					$Email_To = do_shortcode(get_option('it_epoll_settings_reciever_email'));
+				}elseif(!$Email_To){
+					die(json_encode(array("voting_status"=>"error","msg"=>"Please Check Epoll Voting Plugin Setting: You Haven't Set Yet Receiever's Email Field")));
+				}
+
+				$Email_Content = do_shortcode($email_data);
+				$Email_Subject = do_shortcode($email_title);
+
+				// Sending otp to email
+				$adminemail = get_bloginfo('admin_email');
+				$blogname = get_bloginfo('name');
+				$headers[] = 'From: '.$blogname.' <'.$adminemail.'>';
+				$headers[] = 'Content-Type: text/html; charset=UTF-8';
+				$sendMail = 1;
 			}
 
-			$Phone_Content = do_shortcode($phone_data);
+			if($Switcher == 'phone' || $Switcher == 'emailphone'){
+				$phone_data = get_option('it_epoll_settings_v_phone_text');
+				$phone_title = get_option('it_epoll_settings_v_phone_title');
 
-			//Sending OTP to sms
-			$sendSms = 1;
+				if(!$Phone_To && get_option('it_epoll_settings_reciever_mobile')){
+					$Phone_To = intval(do_shortcode(get_option('it_epoll_settings_reciever_mobile')));
+				}elseif(!$Phone_To){
+					die(json_encode(array("voting_status"=>"error","msg"=>"Please Check Epoll Voting Plugin Setting: You Haven't Set Yet Receiever's Mobile Field")));
+				}
 
-		}
+				$Phone_Content = do_shortcode($phone_data);
+				$sendSms = 1;
+			}
 
-
-		if($Switcher){
 			//Asking to Verify Data
-			$savedata ="";
 			$savedata = serialize($data);
-			$ipAddress = it_epoll_get_ip_address();
+			
 			if(it_epoll_saveIPBasedData($poll_id,$option_id,$Email_To,$Phone_To,$savedata,$ipAddress,$it_epoll_otp_code,0)){
 				$outputdata = array();
 				$outputdata['otp_email'] = $Email_To;
@@ -439,13 +969,6 @@ function ajax_it_epoll_vote_by_form(){
 				if($sendSms){
 					if(it_epoll_send_sms($Phone_To,$Phone_Content)){}
 				}
-				if(!get_option('it_epoll_settings_enableOTP')){
-					if(get_post_meta($poll_id,'it_epoll_multivoting',true)){
-					$_SESSION['it_epoll_session_'.$option_id] = uniqid();	
-					}else{
-						$_SESSION['it_epoll_session_'.$poll_id] = uniqid();
-					}	
-				}
 				
 				print_r(json_encode($outputdata));
 			}else{
@@ -454,26 +977,21 @@ function ajax_it_epoll_vote_by_form(){
 				}else{
 					$_SESSION['it_epoll_session_'.$poll_id] = uniqid();
 				}
+				
 				die(json_encode(array("voting_status"=>"error","msg"=>"You Already Voted For This Candidate!")));
 			}
 
-		}else{
-			$savedata ="";
+		} else {
+			// NO OTP REQUIRED - Direct voting
+			
 			$savedata = serialize($data);
-			$ipAddress = it_epoll_get_ip_address();
-			if(it_epoll_saveIPBasedData($poll_id,$option_id,$Email_To,$Phone_To,$savedata,$ipAddress,$it_epoll_otp_code,0)){
-				$oldest_vote = 0;
-				$oldest_total_vote = 0;
-				if(get_post_meta($poll_id, 'it_epoll_vote_count_'.$option_id,true)){
-					$oldest_vote = get_post_meta($poll_id, 'it_epoll_vote_count_'.$option_id,true);	
-				}
-				if(get_post_meta($poll_id, 'it_epoll_vote_total_count')){
-					$oldest_total_vote = get_post_meta($poll_id, 'it_epoll_vote_total_count',true);	
-				}
+			if(it_epoll_saveIPBasedData($poll_id,$option_id,$Email_To,$Phone_To,$savedata,$ipAddress,'',1)){
+				$oldest_vote = get_post_meta($poll_id, 'it_epoll_vote_count_'.$option_id,true) ?: 0;
+				$oldest_total_vote = get_post_meta($poll_id, 'it_epoll_vote_total_count',true) ?: 0;
 			
 				$new_total_vote = intval($oldest_total_vote) + 1;
 				$new_vote = (int)$oldest_vote + 1;
-				//echo $new_vote.'  id=it_epoll_vote_count_'.$option_id;
+				
 				update_post_meta($poll_id, 'it_epoll_vote_count_'.$option_id,$new_vote);
 				update_post_meta($poll_id, 'it_epoll_vote_total_count',$new_total_vote);
 
@@ -484,22 +1002,25 @@ function ajax_it_epoll_vote_by_form(){
 				$outputdata['voting_status'] = 'done';
 				$outputdataPercentage = ($new_vote*100)/$new_total_vote;
 				$outputdata['total_vote_percentage'] = (int)$outputdataPercentage;
+				
 				if(get_post_meta($poll_id,'it_epoll_multivoting',true)){
 					$_SESSION['it_epoll_session_'.$option_id] = uniqid();	
 				}else{
 					$_SESSION['it_epoll_session_'.$poll_id] = uniqid();
 				}
+				
 				print_r(json_encode($outputdata));
 			}else{
 				$_SESSION['it_epoll_session'] = uniqid();
 				die(json_encode(array("voting_status"=>"error","msg"=>"You Already Voted For This Candidate!")));
 			}
-
+		}
 	}
 	die();
-	}
 }
+
 }
+
 add_action( 'wp_ajax_it_epoll_vote_confirm', 'ajax_it_epoll_vote_confirm' );
 add_action( 'wp_ajax_nopriv_it_epoll_vote_confirm', 'ajax_it_epoll_vote_confirm' );
 
@@ -533,7 +1054,6 @@ function ajax_it_epoll_vote_confirm(){
 		if(isset($data['otp'])){
 			$otp = sanitize_text_field($data['otp']);
 		}
-
 
 		//Validate Poll ID
 		if ( ! $poll_id ) {
@@ -596,6 +1116,7 @@ function ajax_it_epoll_vote_confirm(){
 	die();
 }
 
+// ENHANCED UPDATE FUNCTION WITH verified_at
 function it_epoll_updateIPBasedData($poll_id, $option_id, $email=null, $phone=null, $ip,$otp=null,$status){
 
 		global $wpdb;
@@ -619,13 +1140,18 @@ function it_epoll_updateIPBasedData($poll_id, $option_id, $email=null, $phone=nu
 			}
 
 		if($voter_existing){
+			// Update with verified_at timestamp
+			$update_data = array(
+				'voter_status' => 1,
+				'verified_at' => current_time('mysql')
+			);
+			
 			if($phone && $email){
-				$wpdb->update($table_name, array('voter_status'=>1), array('poll_id'=>$poll_id,'voter_otp'=>$otp,'option_id'=>$option_id,'voter_email'=>$email, 'voter_phone'=>$phone),array('%d'),array('%d','%s','%s','%s','%s'));	
+				$wpdb->update($table_name, $update_data, array('poll_id'=>$poll_id,'voter_otp'=>$otp,'option_id'=>$option_id,'voter_email'=>$email, 'voter_phone'=>$phone),array('%d','%s'),array('%d','%s','%s','%s','%s'));	
 			}elseif($phone && !$email){
-				$wpdb->update($table_name, array('voter_status'=>1), array('poll_id'=>$poll_id,'voter_otp'=>$otp,'option_id'=>$option_id,'voter_phone'=>$phone),array('%d'),array('%d','%s','%s','%s'));
+				$wpdb->update($table_name, $update_data, array('poll_id'=>$poll_id,'voter_otp'=>$otp,'option_id'=>$option_id,'voter_phone'=>$phone),array('%d','%s'),array('%d','%s','%s','%s'));
 			}else{
-				$wpdb->update($table_name, array('voter_status'=>1), array('poll_id'=>$poll_id,'voter_otp'=>$otp,'option_id'=>$option_id,'voter_email'=>$email),array('%d'),array('%d','%s','%s','%s'));
-				
+				$wpdb->update($table_name, $update_data, array('poll_id'=>$poll_id,'voter_otp'=>$otp,'option_id'=>$option_id,'voter_email'=>$email),array('%d','%s'),array('%d','%s','%s','%s'));
 			}
 
 			return 1;
@@ -634,6 +1160,7 @@ function it_epoll_updateIPBasedData($poll_id, $option_id, $email=null, $phone=nu
 		}
 }
 
+// ENHANCED SAVE FUNCTION WITH verified_at
 function it_epoll_saveIPBasedData($poll_id, $option_id, $email=null,$phone=null,$data=null,$ip,$otp=null,$status=0){
 	if($poll_id and $option_id and $ip and ($otp || $email || $phone)){
 		//Save Contact Form Data
@@ -678,7 +1205,8 @@ function it_epoll_saveIPBasedData($poll_id, $option_id, $email=null,$phone=null,
 					'voter_phone' => $phone,
 					'voter_ip' => $ip, 
 					'voter_otp'=>$otp, 
-					'voter_status' => $status
+					'voter_status' => $status,
+					'verified_at' => $status == 1 ? current_time('mysql') : NULL
 				),
 				array( 
 					'%d', 
@@ -689,6 +1217,7 @@ function it_epoll_saveIPBasedData($poll_id, $option_id, $email=null,$phone=null,
 					'%s',
 					'%s',
 					'%d',
+					'%s'
 				) 
 			);
 				}
@@ -724,13 +1253,23 @@ function it_epoll_saveIPBasedData($poll_id, $option_id, $email=null,$phone=null,
 					'poll_id' => $poll_id, 
 					'option_id' => $option_id,
 					'voter_ip' => $ip,
-					'voter_status' => $status
+					'voter_status' => $status,
+					'voter_data' => $data ? $data : '',
+					'voter_email' => $email ? $email : '',
+					'voter_phone' => $phone ? $phone : '',
+					'voter_otp' => $otp ? $otp : '',
+					'verified_at' => $status == 1 ? current_time('mysql') : NULL
 				),
 				array(
 					'%d',
 					'%s',
 					'%s',
-					'%d'
+					'%d',
+					'%s',
+					'%s',
+					'%s',
+					'%s',
+					'%s'
 				) 
 			);
 			return 1;
@@ -740,6 +1279,9 @@ function it_epoll_saveIPBasedData($poll_id, $option_id, $email=null,$phone=null,
 		return 0;
 	}
 }
+
+// Run column check on init
+add_action('init', 'it_epoll_ensure_verified_at_column');
 
 if(!function_exists('it_epoll_register_button')){
 	function it_epoll_register_button( $buttons ) {
@@ -1010,5 +1552,123 @@ function it_epoll_show_popup(){
 }
 
 add_action('wp_footer','it_epoll_show_popup');
+
+// Enhanced function to check for recent votes and bypass OTP
+function it_epoll_can_bypass_otp($email, $time_window_hours = 2) {
+    if (empty($email)) {
+        return false;
+    }
+    
+    global $wpdb;
+    $table_name = $wpdb->prefix . "epoll_voting_results";
+    
+    // Ensure verified_at column exists
+    $column_exists = $wpdb->get_results("SHOW COLUMNS FROM $table_name LIKE 'verified_at'");
+    if (empty($column_exists)) {
+        $wpdb->query("ALTER TABLE $table_name ADD COLUMN verified_at TIMESTAMP NULL DEFAULT NULL");
+        $wpdb->query("UPDATE $table_name SET verified_at = NOW() WHERE voter_status = 1 AND verified_at IS NULL");
+    }
+    
+    // Check for recent verification
+    $recent_verification = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $table_name 
+         WHERE voter_email = %s 
+         AND voter_status = 1 
+         AND verified_at IS NOT NULL
+         AND verified_at >= DATE_SUB(NOW(), INTERVAL %d HOUR)",
+        $email, $time_window_hours
+    ));
+    
+    return $recent_verification > 0;
+}
+
+// Function to force enable OTP bypass for testing
+function it_epoll_force_enable_bypass() {
+    // You can call this function in your functions.php temporarily for testing
+    add_filter('it_epoll_bypass_otp_check', '__return_true');
+}
+
+// Enhanced saveIPBasedData function with better verified_at handling
+function it_epoll_saveIPBasedData_enhanced($poll_id, $option_id, $email=null,$phone=null,$data=null,$ip,$otp=null,$status=0){
+    if($poll_id and $option_id and $ip and ($otp || $email || $phone)){
+        global $wpdb;
+        $table_name = $wpdb->prefix . "epoll_voting_results";
+        
+        //checking data
+        if($email and !$phone){
+            $sqli = "voter_email ='$email'";
+        }
+        if(!$email and $phone){
+            $sqli = "voter_phone ='$phone'";
+        }
+        if($email and $phone){
+            $sqli = "voter_email ='$email' or voter_phone='$phone'";
+        }
+        
+        if(get_post_meta($poll_id,'it_epoll_multivoting',true)){
+            $voter_existing = $wpdb->get_var( "SELECT COUNT(*) FROM $table_name where poll_id='$poll_id' and option_id='$option_id' and ($sqli) and voter_status=1 limit 1" );
+        }else{
+            $voter_existing = $wpdb->get_var( "SELECT COUNT(*) FROM $table_name where poll_id='$poll_id' and ($sqli) and voter_status=1 limit 1" );
+        }
+
+        if(!$voter_existing){
+            if(get_post_meta($poll_id,'it_epoll_multivoting',true)){
+                $voter_existing = $wpdb->get_var( "SELECT COUNT(*) FROM $table_name where poll_id='$poll_id' and option_id='$option_id' and ($sqli) and voter_status=0 limit 1" );
+            }else{
+                $voter_existing = $wpdb->get_var( "SELECT COUNT(*) FROM $table_name where poll_id='$poll_id' and ($sqli) and voter_status=0 limit 1" );
+            }
+            
+            if($voter_existing){
+                $wpdb->update($table_name, 
+                    array(
+                        'voter_otp'=>$otp,
+                        'verified_at' => $status == 1 ? current_time('mysql') : NULL
+                    ), 
+                    array(
+                        'poll_id'=>$poll_id,
+                        'option_id'=>$option_id,
+                        'voter_email'=>$email, 
+                        'voter_phone'=>$phone
+                    ),
+                    array('%s','%s'),
+                    array('%d','%s','%s','%s')
+                );
+            }else{
+                $wpdb->insert(
+                    $table_name, 
+                    array( 
+                        'poll_id' => $poll_id,
+                        'option_id' => $option_id,
+                        'voter_data' => $data, 
+                        'voter_email' => $email, 
+                        'voter_phone' => $phone,
+                        'voter_ip' => $ip, 
+                        'voter_otp'=>$otp, 
+                        'voter_status' => $status,
+                        'verified_at' => $status == 1 ? current_time('mysql') : NULL
+                    ),
+                    array( 
+                        '%d', 
+                        '%s',
+                        '%s',
+                        '%s',
+                        '%s',
+                        '%s',
+                        '%s',
+                        '%d',
+                        '%s'
+                    ) 
+                );
+            }
+            return 1;
+        }else{
+            return 0;
+        }
+    }
+    return 0;
+}
+
+
+
 include_once('backend/it_epoll_widget.php');
 ?>

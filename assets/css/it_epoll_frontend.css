@@ -128,7 +128,7 @@
 }
 .it_epoll_short_code {
        margin: 20px;
-    font-size: 13px;
+    font-size: 15px;
     padding: 5px;
     color: #776665;
     border-radius: 40px;
@@ -796,7 +796,7 @@ background: transparent;
 .it_epoll_survey_confirmation_form h3.it_epoll_voting_confirmation_poll_title{
     margin: 0;
     text-align: center;
-    font-size: 13px;
+    font-size: 16px;
     font-weight: bold;
     color: #fffed3;
     padding: 10px;

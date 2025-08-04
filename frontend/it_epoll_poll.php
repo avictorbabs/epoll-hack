@@ -96,7 +96,7 @@ if ( $it_epoll_post_query->have_posts() ) {
 
 			<div class="it_epoll_survey-item-action <?php if(it_epoll_check_for_unique_voting(get_the_id(),$it_epoll_poll_option_id[$i])) echo 'it_epoll_survey-item-action-disabled';?>">
 				<?php if(!it_epoll_check_for_unique_voting(get_the_id(),$it_epoll_poll_option_id[$i])):?>
-				<form action="" name="" class="it_epoll_survey-item-action-form">
+				<form action="" name="" class="it_epoll_survey-item-action-form" style="font-size: 13px;">
 					<input type="hidden" name="it_epoll_poll-id" id="it_epoll_poll-id" value="<?php echo get_the_id();?>">
 					<input type="hidden" name="it_epoll_survey-item-id" id="it_epoll_survey-item-id" value="<?php echo $it_epoll_poll_option_id[$i];?>">
 					<input type="button" name="it_epoll_survey-vote-button" id="it_epoll_survey-vote-button" class="<?php echo $it_epoll_poll_btn_class;?>" value="Vote">
